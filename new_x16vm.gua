@@ -1,0 +1,1034 @@
+
+var maxlimit = 65535
+
+
+
+con intToBinary = function(num) {
+    var result = []
+
+    if (num < 0) {
+        return num
+    }
+
+    // 使用 do while 解决 num 等于 0 的情况
+    while (num > 0) {
+        var temp = num % 2
+        if (temp == 0) {
+            result.add('0')
+        } else {
+            result.add('1')
+        }
+        num = math.floor(num / 2)
+    }
+
+    var l = result.length()
+    if (l < 8) { //补全位数 0000.0000
+        for(var i = 0; i < 8 - l; i += 1) {
+            result.add('0')     //不够的就在前面补0
+        }
+    }
+   
+    // 反转数组
+    result.reverse()
+
+    // 拼合成字符串
+    var bin = 0b
+    for (i, e in result) {
+        bin += e
+    }
+    
+    // log('bin : ', bin)
+    return int(bin)
+}
+
+con shiftRight = function(val, base) {
+    return val >> base
+}
+
+// 小端模式, 例如 把 158 处理为 [0, 1]
+con loEndOfInt = function(num) {
+    num = int(num)
+    var hi = num >> 8
+    var lo = num & 255
+    var v = [lo, hi]
+    return v
+}
+
+var intOfLoEnd = function(lo, hi) {
+    return (hi << 8) + lo
+}
+
+con registerSet = function(reg, val) { // [lo, hi] | num
+    // [0, 1] => 258
+    if (type(val) != type(1)) {
+        val = intOfLoEnd(val[0], val[1])
+    } 
+    this.register[reg] = val
+}
+
+con registerGet = function(reg) {
+    return this.register[reg]
+}
+
+con registerGetInt = function(reg) {
+    return this.register[reg]
+}
+
+con registerGetLo = function(reg) {
+    // 获取 寄存器的 低位
+    var val = this.register[reg]
+    var lo = val & 255
+    return lo
+}
+
+con initCharData = function() {
+    con fonts = {
+        "0": [
+            0b00111000,
+            0b01010100,
+            0b00111000,
+            0b00000000,
+        ],
+        "1": [
+            0b01001000,
+            0b01111100,
+            0b01000000,
+            0b00000000,
+        ],
+        "2": [
+            0b01100100,
+            0b01010100,
+            0b01001000,
+            0b00000000,
+        ],
+        "3": [
+            0b01000100,
+            0b01010100,
+            0b00101000,
+            0b00000000,
+        ],
+        "4": [
+            0b00111100,
+            0b00100000,
+            0b01111000,
+            0b00000000,
+        ],
+        "5": [
+            0b01011100,
+            0b01010100,
+            0b00100100,
+            0b00000000,
+        ],
+        "6": [
+            0b00111000,
+            0b01010100,
+            0b00100000,
+            0b00000000,
+        ],
+        "7": [
+            0b00000100,
+            0b00000100,
+            0b01111100,
+            0b00000000,
+        ],
+        "8": [
+            0b00101000,
+            0b01010100,
+            0b00101000,
+            0b00000000,
+        ],
+        "9": [
+            0b00001000,
+            0b01010100,
+            0b00111000,
+            0b00000000,
+        ],
+        "A": [
+            0b11111100,
+            0b00010010,
+            0b11111100,
+            0b00000000,
+        ],
+        "B": [
+            0b11111110,
+            0b10010010,
+            0b01101100,
+            0b00000000,
+        ],
+        "C": [
+            0b01111100,
+            0b10000010,
+            0b10000010,
+            0b00000000,
+        ],
+        "D": [
+            0b11111110,
+            0b10000010,
+            0b01111100,
+            0b00000000,
+        ],
+        "E": [
+            0b11111110,
+            0b10010010,
+            0b10000010,
+            0b00000000,
+        ],
+        "F": [
+            0b11111110,
+            0b00010010,
+            0b00000010,
+            0b00000000,
+        ],
+        "G": [
+            0b01111100,
+            0b10000010,
+            0b11100010,
+            0b00000000,
+        ],
+        "H": [
+            0b11111110,
+            0b00010000,
+            0b11111110,
+            0b00000000,
+        ],
+        "I": [
+            0b10000010,
+            0b11111110,
+            0b10000010,
+            0b00000000,
+        ],
+        "J": [
+            0b10000010,
+            0b10000010,
+            0b01111110,
+            0b00000000,
+        ],
+        "K": [
+            0b11111110,
+            0b00011000,
+            0b11100110,
+            0b00000000,
+        ],
+        "L": [
+            0b11111110,
+            0b10000000,
+            0b10000000,
+            0b00000000,
+        ],
+        "M": [
+            0b11111110,
+            0b00001100,
+            0b11111110,
+            0b00000000,
+        ],
+        "N": [
+            0b11111110,
+            0b00000010,
+            0b11111100,
+            0b00000000,
+        ],
+        "O": [
+            0b01111100,
+            0b10000010,
+            0b01111100,
+            0b00000000,
+        ],
+        "P": [
+            0b11111110,
+            0b00010010,
+            0b00001100,
+            0b00000000,
+        ],
+        "Q": [
+            0b01111100,
+            0b01000010,
+            0b10111100,
+            0b00000000,
+        ],
+        "R": [
+            0b11111110,
+            0b00010010,
+            0b11101100,
+            0b00000000,
+        ],
+        "S": [
+            0b10001100,
+            0b10010010,
+            0b01100010,
+            0b00000000,
+        ],
+        "T": [
+            0b00000010,
+            0b11111110,
+            0b00000010,
+            0b00000000,
+        ],
+        "U": [
+            0b01111110,
+            0b10000000,
+            0b11111110,
+            0b00000000,
+        ],
+        "V": [
+            0b01111110,
+            0b10000000,
+            0b01111110,
+            0b00000000,
+        ],
+        "W": [
+            0b11111110,
+            0b01100000,
+            0b11111110,
+            0b00000000,
+        ],
+        "X": [
+            0b11101110,
+            0b00010000,
+            0b11101110,
+            0b00000000,
+        ],
+        "Y": [
+            0b00001110,
+            0b11110000,
+            0b00001110,
+            0b00000000,
+        ],
+        "Z": [
+            0b11100010,
+            0b10011010,
+            0b10000110,
+            0b00000000,
+        ],
+        "a": [
+            0b00110000,
+            0b01001000,
+            0b01111000,
+            0b00000000,
+        ],
+        "b": [
+            0b01111110,
+            0b01001000,
+            0b00110000,
+            0b00000000,
+        ],
+        "c": [
+            0b00110000,
+            0b01001000,
+            0b01001000,
+            0b00000000,
+        ],
+        "d": [
+            0b00110000,
+            0b01001000,
+            0b01111110,
+            0b00000000,
+        ],
+        "e": [
+            0b00110000,
+            0b01101000,
+            0b01011000,
+            0b00000000,
+        ],
+        "f": [
+            0b10001000,
+            0b01111100,
+            0b00001010,
+            0b00000000,
+        ],
+        "g": [
+            0b00010000,
+            0b10101000,
+            0b01111000,
+            0b00000000,
+        ],
+        "h": [
+            0b01111110,
+            0b00001000,
+            0b01110000,
+            0b00000000,
+        ],
+        "i": [
+            0b00000000,
+            0b01110100,
+            0b00000000,
+            0b00000000,
+        ],
+        "j": [
+            0b10010000,
+            0b01110100,
+            0b00000000,
+            0b00000000,
+        ],
+        "k": [
+            0b01111110,
+            0b00010000,
+            0b01101000,
+            0b00000000,
+        ],
+        "l": [
+            0b00000000,
+            0b01111110,
+            0b00000000,
+            0b00000000,
+        ],
+        "m": [
+            0b01111000,
+            0b00010000,
+            0b01111000,
+            0b00000000,
+        ],
+        "n": [
+            0b01111000,
+            0b00001000,
+            0b01110000,
+            0b00000000,
+        ],
+        "o": [
+            0b00110000,
+            0b01001000,
+            0b00110000,
+            0b00000000,
+        ],
+        "p": [
+            0b11111000,
+            0b00101000,
+            0b00010000,
+            0b00000000,
+        ],
+        "q": [
+            0b00010000,
+            0b00101000,
+            0b11111000,
+            0b00000000,
+        ],
+        "r": [
+            0b01111000,
+            0b00010000,
+            0b00001000,
+            0b00000000,
+        ],
+        "s": [
+            0b01010000,
+            0b01111000,
+            0b00101000,
+            0b00000000,
+        ],
+        "t": [
+            0b00001000,
+            0b00111100,
+            0b01001000,
+            0b00000000,
+        ],
+        "u": [
+            0b00111000,
+            0b01000000,
+            0b01111000,
+            0b00000000,
+        ],
+        "v": [
+            0b00111000,
+            0b01000000,
+            0b00111000,
+            0b00000000,
+        ],
+        "w": [
+            0b01111000,
+            0b00100000,
+            0b01111000,
+            0b00000000,
+        ],
+        "x": [
+            0b01011000,
+            0b00110000,
+            0b01011000,
+            0b00000000,
+        ],
+        "y": [
+            0b10011000,
+            0b10100000,
+            0b01111000,
+            0b00000000,
+        ],
+        "z": [
+            0b01001000,
+            0b01101000,
+            0b01011000,
+            0b00000000,
+        ],
+        "?": [
+            0b00000010,
+            0b01010010,
+            0b00001110,
+            0b00000000,
+        ],
+        "!": [
+            0b00000000,
+            0b01011110,
+            0b00000000,
+            0b00000000,
+        ],
+        ".": [
+            0b00000000,
+            0b01000000,
+            0b00000000,
+            0b00000000,
+        ],
+        "\\": [
+            0b00000110,
+            0b00011000,
+            0b01100000,
+            0b00000000,
+        ],
+        "'": [
+            0b00000000,
+            0b00000110,
+            0b00000000,
+            0b00000000,
+        ],
+        '"': [
+            0b00000110,
+            0b00000000,
+            0b00000110,
+            0b00000000,
+        ],
+        "[": [
+            0b01111110,
+            0b01000010,
+            0b00000000,
+            0b00000000,
+        ],
+        "]": [
+            0b01000010,
+            0b01111110,
+            0b00000000,
+            0b00000000,
+        ],
+        ",": [
+            0b10000000,
+            0b01000000,
+            0b00000000,
+            0b00000000,
+        ],
+        ":": [
+            0b00000000,
+            0b01010000,
+            0b00000000,
+            0b00000000,
+        ],
+        ";": [
+            0b10000000,
+            0b01010000,
+            0b00000000,
+            0b00000000,
+        ],
+        ")": [
+            0b01000010,
+            0b00111100,
+            0b00000000,
+            0b00000000,
+        ],
+        "(": [
+            0b00111100,
+            0b01000010,
+            0b00000000,
+            0b00000000,
+        ],
+        ">": [
+            0b01000100,
+            0b00101000,
+            0b00010000,
+            0b00000000,
+        ],
+        "<": [
+            0b00010000,
+            0b00101000,
+            0b01000100,
+            0b00000000,
+        ],
+        "^": [
+            0b00000100,
+            0b00000010,
+            0b00000100,
+            0b00000000,
+        ],
+        "/": [
+            0b01100000,
+           0b00011000,
+           0b00000110,
+           0b00000000,
+        ],
+        "*": [
+            0b01010100,
+            0b00111000,
+            0b01010100,
+            0b00000000,
+        ],
+        "&": [
+            0b01110100,
+            0b01011010,
+            0b11100100,
+            0b00000000,
+        ],
+        "+": [
+            0b00010000,
+            0b00111000,
+            0b00010000,
+            0b00000000,
+        ],
+        "-": [
+            0b00010000,
+            0b00010000,
+            0b00010000,
+            0b00000000,
+        ],
+        "=": [
+            0b00101000,
+            0b00101000,
+            0b00101000,
+            0b00000000,
+        ],
+        "$": [
+            0b00101100,
+            0b01111110,
+            0b00110100,
+            0b00000000,
+        ],
+        "_": [
+            0b10000000,
+            0b10000000,
+            0b10000000,
+            0b00000000,
+        ],
+        " ": [
+            0b00000000,
+            0b00000000,
+            0b00000000,
+            0b00000000,
+        ],
+    }
+
+    con charset = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789$?!\'"[].,:;()<>^/&*+-=_ '
+    var addr = 65024
+    for(var i = 0; i < charset.length(); i+=1) {
+        var char = charset[i]
+        var data = fonts[char]
+        for (i, d in data) {
+            this.memory[addr] = d
+            addr += 1
+        }
+    }
+}
+
+// AxePU 改名字了 XVM
+ con XVM = class() {
+
+    con this.initMemory = function(bytes) {
+        var byte_len = bytes.length()
+        var blank_len = maxlimit - byte_len
+        var black_memo = []
+        for(var i = 0; i <= blank_len; i += 1) {
+            black_memo.add(0)
+        }
+        var memory = []
+        memory.extend(bytes)
+        memory.extend(black_memo)
+        // log('**************************** init memory: ', memory.sub(0, 150))
+        return memory
+    }
+
+    con new = function(bytes) {
+        // memory 初始化
+        var this.memory = this.initMemory(bytes)
+        // 初始化 char data
+        initCharData()
+       
+        var this.register = { // 十进制表示
+            pa: 0,
+            a1: 0,
+            a2: 0,
+            a3: 0,
+            c1: 0,
+            f1: 0,
+        }
+
+        var this.regMap = ['pa', 'a1', 'a2', 'a3', 'c1', 'f1']
+    }
+
+    con this.getStep = function(pa) {
+        // 不同的操作, 有不同的步数
+        // log('op == ', this.memory.sub(1, 3))
+
+        var op = this.memory[pa] + ''
+        var stepMap = {
+            '0': 3, // set
+            '1': 4, // load
+            '2': 4, // add
+            '3': 4, // save
+            '4': 3, // compare
+            '5': 3, // jump_if_less
+            '6': 3, // jump
+            '7': 3, // save_from_register
+            '8': 4,  //  set2 a1 256
+            '9': 4, // load2 @258 a2
+            '10': 4, // add2 a1 a2 a3
+            '11': 4,  // save a1 @258
+            '12': 4, // subtract2 a1 a2 a3
+            '13': 3,  // load_from_register a1 a2
+            '14': 3,  // load_from_register2 a1 a2
+            '15': 3, //  save_from_register2 a1 a2
+            '16': 2, //  jump_from_register a1
+            '17': 4, //  shift_right a1 a2 a3
+            '19': 4, // and a1 a2 a3
+        }
+        return stepMap[op]
+    }
+
+    con this.updatePa = function(pa) {
+        var step = this.getStep(pa)
+        registerSet('pa', pa + step)
+    }
+
+    con this.set = function(phrase, errcallback) {
+        var j = phrase[1]
+        var data = phrase[2]
+        var jicunqi = this.regMap[j]
+        registerSet(jicunqi, [data, 0])
+    }
+
+    con this.load = function(phrase , errcallback) {
+        // log('phrase', phrase)
+        // 作用于寄存器时，只改变寄存器的低位， 高位清零
+        // load @258 a1
+        // 1 2 1 1
+        var memoAddress = intOfLoEnd(phrase[1], phrase[2]) 
+        var data = this.memory[memoAddress]
+        var reg = this.regMap[phrase[3]]
+        registerSet(reg, [data, 0])
+    }
+
+    con this.add = function(phrase, errcallback) {
+        var j_a = this.regMap[phrase[1]]
+        var j_b = this.regMap[phrase[2]]
+        var j_c = this.regMap[phrase[3]]
+        var sum = registerGetLo(j_a) + registerGetLo(j_b)
+        registerSet(j_c, [sum, 0])
+    }
+
+    con this.save = function(phrase, errcallback) { // 注意内存地址是十六位, 但是 save 只存‘单字节’
+        // save a1 @258
+        // 3 1 2 1
+        var reg = this.regMap[phrase[1]]
+        var memoAddress = intOfLoEnd(phrase[2], phrase[3])
+        var val = registerGetLo(reg)
+        this.memory[memoAddress] = val
+        // this.memory[memoAddress + 1] = val[1]
+
+        // log 操作
+        val = registerGetInt(reg)
+        if (val == 0 and memoAddress == 65534) {
+            log('log ---------', 'f1: ', registerGetInt('f1'))
+            log('log ---------', 'a1: ', registerGetInt('a1'))
+            log('log ---------', 'a2: ', registerGetInt('a2'))
+        }
+    }
+
+    con this.compare = function(phrase, errcallback) {
+        var j_a = this.regMap[phrase[1]]
+        var j_b = this.regMap[phrase[2]]
+        var a = registerGetLo(j_a) 
+        var b = registerGetLo(j_b) 
+        var c1 = [0, 0]
+        if (a == b) {
+            c1 = loEndOfInt(0)
+        } else if (a < b) {
+            c1 = loEndOfInt(1)
+        } else {
+            c1 = loEndOfInt(2)
+        }
+        registerSet('c1', c1)
+    }
+
+    con this.jump_if_less = function(phrase, errcallback) {
+        var lo = phrase[1]
+        var hi = phrase[2]
+        var target_pa = intOfLoEnd(lo, hi)
+        if (registerGetInt('c1') == 1) {
+            registerSet('pa', target_pa)
+        }
+    }
+
+    con this.jump = function(phrase, errcallback) {
+        var lo = phrase[1]
+        var hi = phrase[2]
+        var target_pa = intOfLoEnd(lo, hi)
+        registerSet('pa', target_pa)
+    }
+
+    con this.save_from_register = function(phrase, errcallback) {
+        var j_a = this.regMap[phrase[1]]
+        var j_b = this.regMap[phrase[2]]
+        var data_in_j_a = registerGetLo(j_a)
+        var data_in_j_b = registerGetInt(j_b)
+        this.memory[data_in_j_b] = data_in_j_a
+    }
+
+    con this.set2 = function(p, errcallback) {
+        // set2 a1 256
+        // 8, 1, 0, 1
+        var reg = this.regMap[p[1]]
+        var lo = p[2]
+        var hi = p[3]
+        registerSet(reg, [lo, hi])
+    }
+
+    con this.load2 = function(p, errcallback) {
+        // log('load2 ======= ', p)
+        // load2 @258 a2
+        // 9, 2, 1, 2,
+        var lo = p[1]
+        var hi = p[2]
+        var memo = intOfLoEnd(lo, hi)
+        var val = intOfLoEnd(this.memory[memo], this.memory[memo + 1])
+        var reg = this.regMap[p[3]]
+        registerSet(reg, val)
+    }
+
+    con this.add2 = function(p, errcallback) {
+        // add2 a1 a2 a3
+        //  10, 1, 2, 3
+        var reg1 = this.regMap[p[1]]
+        var reg2 = this.regMap[p[2]]
+        var reg3 = this.regMap[p[3]]
+        var sum = registerGetInt(reg1) + registerGetInt(reg2)
+        var val = loEndOfInt(sum)
+        registerSet(reg3, val) 
+    }
+
+    con this.save2 = function(p, errcallback) {
+        // log('save2 !!!!!!!!!!!!!!!!!!!', p)
+        // save2 a2 @65534
+        // 65534 被翻译为 254 255
+        //  11, 2, 254, 255,
+        var reg = this.regMap[p[1]]
+        var val = registerGet(reg)
+        // 十进制 转 小端
+        val = loEndOfInt(val)
+        var memo = intOfLoEnd(p[2], p[3])
+        this.memory[memo] = val[0]
+        this.memory[memo + 1] = val[1]
+        // log 操作
+        val = registerGetInt(reg)
+        if (val == 0 and memo == 65534) {
+            log('【 register msg 】=======> ')
+            log('f1: ', registerGetInt('f1'))
+            log('a1: ', registerGetInt('a1'))
+            log('a2: ', registerGetInt('a2'))
+        }
+
+        if (reg == 'a2' and memo == 65532) {
+            var mag = intOfLoEnd(this.memory[65532], this.memory[65533])
+            log('【 msg 】=======> ', mag)
+        }
+    }
+
+    con this.subtract2 = function(p, errcallback) {
+        //  subtract2 a1 a2 a3
+        //  12, 1, 2, 3
+        var reg1 = this.regMap[p[1]]
+        var reg2 = this.regMap[p[2]]
+        var reg3 = this.regMap[p[3]]
+        // log('regs: ', reg1, reg2, reg3)
+        var sub = registerGetInt(reg1) - registerGetInt(reg2)
+        var val = loEndOfInt(sub)
+        registerSet(reg3, val) 
+        if (reg3 == 'pa') {
+            errcallback('subtract2 error')
+        }
+    }
+    
+    con this.load_from_register = function(p, errcallback) {
+        //  load_from_register a1 a2
+        //  13, 1, 2,
+        var reg1 = this.regMap[p[1]]
+        var memo = registerGetInt(reg1)
+        var val = this.memory[memo]
+        var reg2 = this.regMap[p[2]]
+        registerSet(reg2, [val, 0]) 
+    }
+
+    con this.load_from_register2 = function(p, errcallback) {
+        //  load_from_register2 a1 a2
+        //  14, 1, 2
+        // ; load_from_register2 a1(@100) a2
+        // ; a1: 100，则会把a1中内存地址 @100 @101 中的值读取到 a2 寄存器中
+        var reg1 = this.regMap[p[1]]
+        var memo = registerGetInt(reg1)
+        var lo = this.memory[memo]
+        var hi = this.memory[memo + 1]
+        var reg2 = this.regMap[p[2]]
+        registerSet(reg2, [lo, hi])
+    }
+    
+    con this.save_from_register2 = function(p, errcallback) {
+        //  save_from_register2 a1 a2
+        //  15, 1, 2
+        var reg1 = this.regMap[p[1]]
+        var val = registerGet(reg1)
+        // 十进制转小端
+        val = loEndOfInt(val)
+        var reg2 = this.regMap[p[2]]
+        var memo = registerGetInt(reg2)
+        this.memory[memo] = val[0]
+        this.memory[memo + 1] = val[1]
+    }
+    
+    con this.jump_from_register = function(p, errcallback) {
+        //  jump_from_register a1
+        //  16, 1,
+        var reg = this.regMap[p[1]]
+        var pa = registerGetInt(reg)
+        registerSet('pa', pa)
+    }
+
+    con this.shift_right = function(p, errcallback) {
+        //  shift_right a1 a2 a3
+        //  17, 1, 2, 3
+        var reg1 = this.regMap[p[1]]
+        var reg2 = this.regMap[p[2]]
+        var reg3 = this.regMap[p[3]]
+        var val = registerGetInt(reg1)
+        var n = registerGetInt(reg2)
+        var shiftedVal = val >> n
+        registerSet(reg3, shiftedVal)
+    }
+
+    con this.and_func = function(p, errcallback) {
+        //  and a1 a2 a3
+        //  19, 1, 2, 3
+        var reg1 = this.regMap[p[1]]
+        var reg2 = this.regMap[p[2]]
+        var reg3 = this.regMap[p[3]]
+        var val1 = registerGetInt(reg1)
+        var val2 = registerGetInt(reg2)
+        var val3 = val1 & val2
+        registerSet(reg3, val3)
+    }
+
+    
+
+    con this.runCode = function(pa, errcallback) { 
+        // pa 是 old pa, 所以要加 step
+        // log('pa before------------------------------ ', pa)
+        var step = this.getStep(pa)
+        var op = this.memory[pa] + ''
+        // log('------------- op:', op)
+        var runMap = {
+            '0': this.set,
+            '1': this.load,
+            '2': this.add,
+            '3': this.save,
+            '4': this.compare,
+            '5': this.jump_if_less,
+            '6': this.jump,
+            '7': this.save_from_register,
+            '8': this.set2,
+            '9': this.load2,
+            '10': this.add2,
+            '11': this.save2,
+            '12': this.subtract2,
+            '13': this.load_from_register,
+            '14': this.load_from_register2,
+            '15': this.save_from_register2,
+            '16': this.jump_from_register,
+            '17': this.shift_right,
+            '19': this.and_func
+        }
+        // 切出当前的指令段
+        var phrase = this.memory.sub(pa, pa + step)
+        // log('phrase == ', phrase)
+
+        // 执行
+        runMap[op](phrase, errcallback)
+    }
+
+    con run = function() {
+        // run 函数将 memory 数组视为内存，并且以 pa 存储的地址为起点执行代码
+        // 注意，memory 目前只能支持 256 字节，因为 pa 寄存器只有 8 位
+        while(true) {
+            // 1. 从 pa 存储的地址中拿到指令
+            var pa = registerGetInt('pa')
+
+            // 终止条件
+            if (this.memory[pa] == maxlimit) {
+                // log('---------------------- vm 执行停止 -------------------')
+                // log('memory ======= [500, 510]: ', this.memory.sub(500, 510))
+                // log('memory ======= [50000, 50010]: ', this.memory.sub(50000, 50010))
+                break
+            }
+            // 2. 先根据指令增加 pa 的值
+            this.updatePa(pa)
+            // 3. 然后模拟执行代码
+            this.runCode(pa, function(err) {
+                if (err) {
+                    log('run error !!!!, message is =============', err)
+                    break
+                }
+            })
+        }
+    }
+
+    con display = function() {
+        /* 
+        为 AxePU 增加一个 display 方法
+
+        使用方法是先调用 run 执行代码再调用 display 显示
+
+        我们为虚拟机增加一个显示屏，显示屏的像素是 10x10
+        因此内存的最后 100 个字节用于表示屏幕上的内容，每个字节表示一个像素，从左到右从上到下
+        也就是说内存 156 存储了屏幕左上角第一个像素的颜色，具体表示方法见下方机器码例子
+        程序通过设置这 100 个字节的内存来控制屏幕的显示
+
+        3w - 4w 是显存
+        */
+
+        var w = 500
+        var h = 500
+
+        var running = false
+
+        GuaCanvas.init(w, h)
+
+        // 设置事件回调
+        // GuaCanvas.onEvent(event)
+
+        while (GuaCanvas.running() and running == false) {
+            GuaCanvas.updateEvents()
+
+            // 画图
+            GuaCanvas.clear()
+
+             // 显示屏的像素是 100x100， 每个字节表示一个像素
+             var pixSize = 100
+             // 放大显示, 一个像素可以显示为 5 px
+             var scaleSize = 5
+
+             for (var i = 0; i < pixSize; i += 1) { // y 坐标
+                 for (var j = 0; j < pixSize; j += 1) { // x 坐标
+                     var addr = 30000 + (j + (i * 100)) // 30000 + (x + y * 100)
+                     var color = this.memory[addr]
+                     var x = j * scaleSize
+                     var y = i * scaleSize
+                     var w = scaleSize
+                     var h = scaleSize
+
+                    if (color) {
+                        // log('画图!!!!!! ', x, y, addr, color)
+                        GuaCanvas.rect(x, y, w, h, color, 0, 0, color)
+                    }
+                 }
+             }
+
+            GuaCanvas.show()
+        }
+    }
+}

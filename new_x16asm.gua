@@ -1,0 +1,1196 @@
+con pureAsm = function(asm: string) {
+    // 根据换行符把字符串切成数组
+    asm = asm.split('\n')
+    var _asm = []
+    for (i, a in asm) {
+        a = a.strip()
+        // 去掉空格，注释
+        if (a != "" and a.startswith(';') == false) {
+            _asm.add(a)
+        }
+    }
+    return _asm
+}
+
+con regByName = function(name) {
+    var reg = {
+        'pa': 0,
+        'a1': 1,
+        'a2': 2,
+        'a3': 3,
+        'c1': 4,
+        'f1': 5,
+    }
+    return reg[name]
+}
+
+con memoAddress = function(addressLabel, type = '') {
+    var res = ''
+    var m = addressLabel.sub(1)
+    if (m == '{}'.format(int(m))) { // 数字
+        if (type == 'x16') {
+            res = intX16(m) // [lo, hi]
+        } else {
+            res = [int(m)]
+        }
+    } else {
+        res = [addressLabel]
+    }
+    return res
+}
+
+con labelAddress = function() {
+    var memo = str.split('@')[1]
+    return int(memo)
+}
+
+// 小端
+con intX16 = function(num) {
+    num = int(num)
+    var hi = num >> 8
+    var lo = num & 255
+    var v = [lo, hi]
+    return v
+}
+
+con replaceLabel = function(bytes, labelAddress) {
+    var b = []
+    for (i, e in bytes) {
+        if (labelAddress.has(e)) {
+            // 现在的 label 地址是 16 位了
+            var address = intX16(labelAddress[e])
+            b.extend(address)
+        } else {
+            b.add(e)
+        }
+    }
+    return b
+}
+
+con isNumStr = function(v) {
+    // '12'
+    return v == '{}'.format(int(v))
+}
+
+con charsetIndex = function(v) {
+    con charset = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789$?!\'"[].,:;()<>^/&*+-=_ '
+    var index = charset.find(v)
+    // 小标从 1 开始
+    return index + 1
+}
+
+// 收集所有的函数 和函数 定义
+con collect_function_and_varible = function(asm) {
+    var target = []
+    this.curScope = ''
+    for (var i = 0; i < asm.length(); i += 1) {
+        target.add(asm[i])
+        // 
+        var line = asm[i].split(' ')
+        if (line[0] == '.function') {
+            var func = line[1].split(':')
+            var func_name = func[0]
+            var func_byte = func[1]
+            this.globalDefinition[func_name] = {
+                'byte': int(func_byte),
+                'vars': {}
+            }
+            this.curScope = func_name
+            //
+            for (var i = 2; i < line.length(); i += 1) {
+                var _var = line[i].split(':')
+                var var_name = _var[0]
+                var var_byte = _var[1]
+                this.globalDefinition[this.curScope]['vars'][var_name] = var_byte
+            }
+        } 
+        else if (line[0] == '.var2') {
+            var var_name = line[1]
+            if (this.globalDefinition.has(this.curScope)) {
+                this.globalDefinition[this.curScope].vars[var_name] = 2
+            } else {
+                this.globalDefinition['global_vars'][var_name] = 2
+            }
+        }
+        else if (line[0] == '.var') {
+            var var_name = line[1]
+            if (this.globalDefinition.has(this.curScope)) {
+                this.globalDefinition[this.curScope].vars[var_name] = 1
+            } else {
+                this.globalDefinition['global_vars'][var_name] = 1
+            }
+        }
+    }
+
+    // log('globalDefinition === ', this.globalDefinition)
+    return target
+}
+
+// 翻译条件语句
+con handle_if_ifelse_while = function(asm) {
+    this.globalIndexWhile = 0 // 可能有多个 while 
+
+    this.globalIndexIf = 0 // 可能有多个 if 
+
+    this.stack = []
+
+    var __asm = []
+    for (i, each in asm) {
+        var line = each.split(' ')
+        var dummyCode = line[0]
+        var codes = []
+
+        // while 分支
+        if (dummyCode == '.while') { // 只支持 变量比较
+            // .while a < b {
+            var arg1 = line[1]
+            var arg2 = line[3]
+            var key = '_{}'.format(this.globalIndexWhile)
+            //
+            var codes = [
+                '@while_start' + key,
+                    '.load {} a1'.format(arg1),
+                    '.load {} a2'.format(arg2),
+                    'compare a1 a2',
+                    'jump_if_less @while_body' + key,
+                    'jump @while_end' + key,
+                '@while_body' + key,
+            ]
+            __asm.extend(codes)
+            this.globalIndexWhile += 1
+            // 入栈
+            this.stack.add('@while' + key)
+            // log('+++++++++++++  this.stack 【IN】: ', this.stack)
+        }
+        // if 分支
+        else if (dummyCode == '.if') {
+            var arg1 = line[1]
+            var arg2 = line[3]
+            var key = '_{}'.format(this.globalIndexIf)
+            if (line[2] == '<') {
+                // .if a < b {   
+                codes = [
+                    '@if' + key,
+                    '.load {} a1'.format(arg1),
+                    '.load {} a2'.format(arg2),
+                    'compare a1 a2',
+                    'jump_if_less @if_body' + key,
+                        // 注意！！ 此时先不管后面有没有 else 分支都统一跳转 @if_else
+                    'jump @if_else' + key,  
+    
+                    '@if_body' + key,
+                ]
+            } else {
+                // .if a == b {
+                // 判断相等逻辑， 比较两次，如果 a1 !< a2 且 a2 !< a1,就证明相等
+                codes = [
+                    '@if' + key,
+                    '.load {} a1'.format(arg1),
+                    '.load {} a2'.format(arg2),
+                    'compare a1 a2',
+                    'jump_if_less @if_else' + key,
+                    'jump @compare_reverse' + key,
+                    // 第二次反向比较
+                    '@compare_reverse' + key,
+                    '.load {} a1'.format(arg2),
+                    '.load {} a2'.format(arg1),
+                    'compare a1 a2',
+                    'jump_if_less @if_else' + key,
+                    'jump @if_body' + key,
+    
+                    '@if_body' + key,
+                ]
+
+            }
+            __asm.extend(codes)
+
+            // if分支 入栈
+            this.stack.add('@if' + key)
+            this.globalIndexIf += 1
+            // log('+++++++++++++  this.stack 【IN】: ', this.stack)
+        } 
+        // else 分支
+        else if (each == '} .else {') {
+            // pop 出栈中最近 scope
+            var curScope = this.stack.pop() // @if_0
+            // log('-----------------  this.stack 【OUT】: ', this.stack, ' | OUT: ', curScope)
+            var key = curScope.split('_')[1]
+            var codes = [
+                'jump @if_end_{}'.format(key), // if_block结尾句
+                '@if_else_{}'.format(key),
+            ]
+            // else 分支入栈
+            this.stack.add('@else_' + key)
+            __asm.extend(codes)
+            // log('+++++++++++++  this.stack 【IN】: ', this.stack)
+        }
+        // 结束部分
+        else if (each == '}') {
+            // pop 出栈中最近一条
+            var codes = []
+            var curScope = this.stack.pop()
+            // log('-----------------  this.stack 【OUT】: ', this.stack, ' | OUT: ', curScope)
+
+            var key = curScope.split('_')[1] //  @if_0
+            if (curScope.has('if')) {
+                // 说明 if 是没有 else 分支的，此时就手动添加一个 @if_else 标签， 已便于 if 判断那跳转过来
+                codes.extend([
+                    'jump @if_end_{}'.format(key),
+                    '@if_else_{}'.format(key),
+                    'jump @if_end_{}'.format(key),
+                ])
+                codes.extend([
+                    '@if_end_{}'.format(key),
+                ])
+                // log('if 函数结束 ======================================================  {}'.format(key), this.stack)
+            } 
+            else if (curScope.has('else')) {
+                // 有 else 分支 那就直接结束
+                codes.extend([
+                    '@if_end_{}'.format(key),
+                ])
+                // log('else 函数结束 ======================================================  {}'.format(key), this.stack)
+            }
+            else if (curScope.has('while')) {
+                codes = [
+                    'jump @while_start_{}'.format(key),
+                    '@while_end_{}'.format(key)
+                ]
+                // log('while 函数结束 ======================================================  {}'.format(key), this.stack)
+            }
+
+            __asm.extend(codes)    
+        } 
+        else {
+            __asm.add(each)
+
+            // 更新当前scope
+            if (line[0] == '.function') {
+                this.curScope = line[1].split(':')[0]
+            }
+        }
+    }
+    return __asm
+
+}
+
+// 翻译伪指令
+con transDummyCode = function(asm) {
+    this.offsetMap = {
+        // a: {
+            // offset: 0,
+            // byte: 2
+    }
+    this.localOffset = 0
+
+    var a = []
+    for (i, each in asm) {
+        var line = each.split(' ')
+        var dummyCode = line[0]
+        if (dummyCode == '.memory') {
+            // .memory 1024
+            var end = int(line[1])
+            var start = 3
+            for (var i = start; i < end; i += 1) {
+                a.add('halt')
+            }
+        } 
+       
+        else if (dummyCode == '.call') {
+            // --------------------------
+            // 普通 .call 适用于【局部变量】
+            // -----------------------------
+            if (line.length() == 2) {
+                // .call @function_add
+                var func = line[1]
+                if (func.has('@') == false) {
+                    func = '@' + func
+                }
+                var codes = [
+                // 存储返回位置到 f1
+                'set2 a3 14',
+                'add2 pa a3 a3',
+                'save_from_register2 a3 f1', 
+                // f1 + 2
+                'set2 a3 2',
+                'add2 f1 a3 f1',
+                // 跳转到函数
+                'jump {}'.format(func)
+                ] 
+                a.extend(codes)
+            } 
+
+
+            // --------------------------
+            // 变量传参 .call 适用于 【用变量给函数传参语法】
+            //  1.判断有没有数字 参数， 做 var 操作
+            //  2.搬运参数 到 即将 call的函数内部内存中（传参）
+            //  3.调用函数
+            // -----------------------------
+            else {
+                // char set 处理
+                // 把所有字符. 如 'a'， 'A'， 转为 charset 下标
+                for (var i = 2; i < line.length(); i += 1) {
+                    if (line[i].has("'")) {
+                        var char = line[i].sub(1, 2)
+                        line[i] = charsetIndex(char) + ""
+                        //  log('new line !!!!! : ', line)    
+                    }
+                }
+                
+
+
+                var codes = []
+                var copy_params =[]
+                var func = line[1]
+                // 给 function 统一添加 @符号
+                if (func.has('@') == false) {
+                    func = '@' + func
+                }
+                
+                // ---------- 1.准备参数  ----------
+                // 提前判断：参数 可能是数字，此处 手动 var 处理
+                var callArgs = []
+                for (var i = 2; i < line.length(); i += 1) {
+                    var _var = line[i]
+                    // --------------(1).参数是数字 ----------------
+                    if (isNumStr(_var)) {
+                        copy_params.extend([
+                            // 存储变量到 var -> a1 -> f1
+                            'set2 a1 {}'.format(int(_var)), 
+                            'save_from_register2 a1 f1',
+                            // ; f1 + 2
+                            'set2 a3 2',
+                            'add2 f1 a3 f1'
+                        ])
+                        // 更新 offset 暂定统一写为 2 字节
+                        var variable = '#@arg_{}'.format(i)
+                        var offset = this.localOffset
+                        this.offsetMap[variable] = {
+                            'offset': offset,
+                            'byte': 2,
+                        }
+                        this.localOffset += 2
+                        callArgs.add(variable)
+                    } 
+                     // -------------------(2).参数是 字符 --------------------------
+                    // 把所有字符. 如 'a'， 'A'， 转为 charset 下标
+                    else if (_var.has("'")) {
+                        var char = _var.sub(1, 2)
+                        var charset = charsetIndex(char)
+                        copy_params.extend([
+                                // 存储变量到 var -> a1 -> f1
+                            'set2 a1 {}'.format(charset), 
+                            'save_from_register2 a1 f1',
+                                // ; f1 + 2
+                            'set2 a3 2',
+                            'add2 f1 a3 f1'
+                        ])
+                        // 更新 offset 暂定统一写为 1 字节
+                        var variable = '#@arg_{}'.format(i)
+                        var offset = this.localOffset
+                        this.offsetMap[variable] = {
+                            'offset': offset,
+                            'byte': 1,
+                        }
+                        this.localOffset += 1
+                        callArgs.add(variable)
+                    }
+                    // ----------（3）参数是变量 --------------
+                    else {
+                        callArgs.add(_var)
+                    }
+
+                }
+
+                // ---------- 2.传参 ----------
+                // 注意：搬运的目标位置，由当前 call 的参数长度决定，而非 this.offsetmap
+                // log('搬运参数 === ', this.localOffset, this.offsetMap)
+                var calloffset = 2
+                for (i, _var in callArgs) {
+
+                        // 取参数的内存地址
+                        // 当函数参数是 &s 这种形式时，转换时，把字符串转换成该 s 字符串的第一个字符的下标 即 首字符的 f1 地址
+                        // 所以 局部变量中的值 实际是 f1 地址 
+                    if (_var.has('&')) { // 注意！ 此处 默认 2 字节
+                        _var = _var.sub(1)
+                        var v = this.offsetMap[_var]
+                        var _byte = v.byte
+                        var _offset = v.offset
+                         copy_params.extend([
+                                // 1.获取  参数的f1段地址
+                            'set2 a1 {}'.format(this.localOffset - _offset),
+                            'subtract2 f1 a1 a1',
+                                // 2. 把地址写入到 [f1+2]
+                            'set2 a3 {}'.format(calloffset),
+                            'add2 f1 a3 a3',
+                            'save_from_register2 a1 a3',
+                        ])
+                        calloffset += 2
+                    } else {
+                        var v = this.offsetMap[_var]
+                        var _byte = v.byte
+                        var _offset = v.offset
+
+                        if (_byte == 2) {
+                            // 2字节
+                            copy_params.extend([
+                                    // 1.读取 变量a, a1 <- [f1-]
+                                'set2 a3 {}'.format(this.localOffset - _offset),
+                                'subtract2 f1 a3 a3',
+                                'load_from_register2 a3 a1',
+                                    // 2.保存 变量a, a1 -> [f1+2], 即 f1[9-10]
+                                'set2 a3 {}'.format(calloffset),
+                                'add2 f1 a3 a3',
+                                'save_from_register2 a1 a3',
+                            ])
+                            calloffset += 2
+                        } else {
+                            // 1字节
+                            copy_params.extend([
+                                    // 1.读取 变量a, a1 <- [f1-offset]
+                                'set2 a3 {}'.format(this.localOffset - _offset),
+                                'subtract2 f1 a3 a3',
+                                'load_from_register a3 a1',
+                                    // 2.保存 变量a, a1 -> [f1+_calloffset], 
+                                'set2 a3 {}'.format(calloffset),
+                                'add2 f1 a3 a3',
+                                'save_from_register a1 a3',
+                            ])
+                            calloffset += 1
+                        }
+
+                    }
+                }
+                 
+                // 3.----------- 调用函数 ------------
+                // 1.存储 函数返回位置
+                // 2. f1 + 2
+                // f1 现在仍然是 7，所以  f1[7-8]:返回位置， f1[9-10]参数1，f1[11-12]参数2
+                var call_func = [
+                        // 存储返回位置到 f1
+                    'set2 a3 14',
+                    'add2 pa a3 a3',
+                    'save_from_register2 a3 f1', 
+                        // f1 + 2
+                    'set2 a3 2',
+                    'add2 f1 a3 f1',
+                        // f1 现在是 9
+                        // 跳转到函数
+                    'jump {}'.format(func)
+                ] 
+                    // f1 现在是 9
+                codes.extend(copy_params)
+                codes.extend(call_func)
+                a.extend(codes)
+
+
+            }
+
+            // log('-------------- ########### .call:  ', this.localOffset, this.offsetMap)
+
+        } 
+        
+        else if (dummyCode == '.var2') {
+                /***
+                1.存储变量到 -> a1 -> f1
+                2.f1 + 2 
+                3.更新 offset
+                */
+            // var a 或 var a 12
+            var codes = []
+            // 1. 存储变量到 var -> a1 -> f1
+            var val = 0
+            if (line.length() == 3) {
+                // 判断是否时 英文 如： 'A'
+                if (isNumStr(line[2])) {
+                    val = int(line[2])
+                } else {
+                    // log('.VAR ===== 是英文字母: ', line[2])
+                    var char = line[2].sub(1, 2) // 'A'
+                    val = charsetIndex(char)
+                }
+            }
+            // 2. f1 + 2
+            codes.extend([
+                'set2 a1 {}'.format(val), 
+                'save_from_register2 a1 f1',
+
+                'set2 a3 2',
+                'add2 f1 a3 f1'
+            ])
+            a.extend(codes)
+
+            // 更新 offset:
+            var variable = line[1]
+            var offset = this.localOffset
+            this.offsetMap[variable] = {
+                'offset': offset,
+                'byte': 2
+            }
+            this.localOffset = offset + 2
+            // log('-------------- ,this.localOffset *********** var2:', this.localOffset, this.offsetMap)
+        }
+        else if (dummyCode == '.var') { // 1 byte
+            // var a 或 var a 12
+            // 1.存储变量到 -> a1 -> f1
+            // 2.f1 + 1
+            // 3.更新 offset
+        var codes = []
+        // 1. 存储变量到 var -> a1 -> f1
+        var val = 0
+        if (line.length() == 3) {
+            // 判断是否时 英文 如： 'A'
+            if (isNumStr(line[2])) {
+                val = int(line[2])
+            } else {
+                // log('.VAR ===== 是英文字母: ', line[2])
+                var char = line[2].sub(1, 2) // 'A'
+                val = charsetIndex(char)
+            }
+        }
+        // 2. f1 + 1
+        codes.extend([
+            'set2 a1 {}'.format(val), 
+            'save_from_register a1 f1',
+
+            'set2 a3 1',
+            'add2 f1 a3 f1'
+        ])
+        a.extend(codes)
+
+        // 更新 offset:
+        var variable = line[1]
+        var offset = this.localOffset
+        this.offsetMap[variable] = {
+            'offset': offset,
+            'byte': 1
+        }
+        this.localOffset += 1
+    }
+        else if (dummyCode == '.add2') { // 区分 1 、2 字节
+                // .add2 x y z
+                //  变量 x + 变量 y, 存入 变量 z
+            var v1 = line[1]
+            var v2 = line[2]
+            var v3 = line[3]
+            var o1 = this.localOffset - this.offsetMap[v1].offset
+            var o2 = this.localOffset - this.offsetMap[v2].offset
+            var o3 = this.localOffset - this.offsetMap[v3].offset
+
+            var v1_byte = this.offsetMap[v1].byte
+            var v2_byte = this.offsetMap[v2].byte
+            var v3_byte = this.offsetMap[v3].byte
+            
+
+            var codes = []
+            // 读取 变量 a 到 a1
+            // localOffset - a.offset 也就是 6-0 = 6
+            if (v1_byte == 2) {
+                codes.extend([
+                    'set2 a3 {}'.format(o1),
+                    'subtract2 f1 a3 a3',
+                    'load_from_register2 a3 a1',
+                ])
+            } else {
+                codes.extend([
+                    'set2 a3 {}'.format(o1),
+                    'subtract2 f1 a3 a3',
+                    'load_from_register a3 a1',
+                ])
+
+            }
+            // 读取 变量 b 到 a2
+            // localOffset - a.offset 也就是 6-2 = 4
+            if (v2_byte == 2) {
+                codes.extend([
+                    'set2 a3 {}'.format(o2),
+                    'subtract2 f1 a3 a3',
+                    'load_from_register2 a3 a2',
+                ])
+            } else {
+                codes.extend([
+                    'set2 a3 {}'.format(o2),
+                    'subtract2 f1 a3 a3',
+                    'load_from_register a3 a2',
+                ])
+
+            }
+
+            if (v3_byte == 2) {
+                codes.extend([
+                        // a + b 存入 a1
+                    'add2 a1 a2 a1',
+                        // 写入 a1 的值到变量 c
+                        // localOffset - a.offset 也就是 6-4 = 2
+                    'set2 a3 {}'.format(o3),
+                    'subtract2 f1 a3 a3',
+                    'save_from_register2 a1 a3',    
+                ])
+            } else {
+                codes.extend([
+                    // a + b 存入 a1
+                    'add2 a1 a2 a1',
+                        // 写入 a1 的值到变量 c
+                        // localOffset - a.offset 也就是 6-4 = 2
+                    'set2 a3 {}'.format(o3),
+                    'subtract2 f1 a3 a3',
+                    'save_from_register a1 a3',    
+                ])
+            }
+            
+            a.extend(codes)
+        }
+        else if (dummyCode == '.return_value') { // 返回的变量 区分 1 、 2 字节
+            //  .return_value c
+            var codes =[]
+            // 如果后面跟了变量， 需要在函数返回前把当前变量的值写入 a1
+            if (line.length() == 2) { 
+                var v = line[1]
+                var o = this.localOffset - this.offsetMap[v].offset
+                var b = this.offsetMap[v].byte
+                if (b == 2) {
+                    codes.extend([
+                        // 把当前变量值 存入 a1 
+                        'set2 a3 {}'.format(o),
+                        'subtract2 f1 a3 a3',
+                        'load_from_register2 a3 a1',
+                    ])
+                } else {
+                    codes.extend([
+                        // 把当前变量值 存入 a1
+                        'set2 a3 {}'.format(o),
+                        'subtract2 f1 a3 a3',
+                        'load_from_register a3 a1',
+                    ])
+                }
+                
+            }
+
+            codes.extend([
+               // .return 2 + 6 (localOffset的长度)
+               'set2 a3 {}'.format(2 + this.localOffset), 
+               'subtract2 f1 a3 f1',
+               'load_from_register2 f1 a3',
+               'jump_from_register a3'
+            ])
+            a.extend(codes)
+        }
+        else if (dummyCode == '.return') {
+            var local_memo_bytes = 0
+            if (line.length() == 2) {
+                local_memo_bytes = int(line[1])
+            }
+            var codes = [
+                // 这里＋2是： 2 (2个内存用于存储函数返回地址) + f1局部内存的长度
+                'set2 a3 {}'.format(2 + local_memo_bytes), 
+                'subtract2 f1 a3 f1',
+                'load_from_register2 f1 a3',
+                'jump_from_register a3'
+            ]
+            a.extend(codes)
+        }
+        else if (dummyCode == '.log') {
+            // .log 0
+            var codes = [
+                'set2 a2 0',
+                'save2 a2 @65534'
+            ]
+            a.extend(codes)
+        } 
+        else if (line[0] == 'save2' and line[1] == '0' ) {
+            // save2 0 @65534
+            // log a1 寄存器的值
+            var codes = [
+                'set2 a2 0',
+                'save2 a2 @65534'
+            ]
+            a.extend(codes)
+        }
+        else if (dummyCode == '.print') {
+            // .log msg | 111
+            var codes = []
+            var variable = line[1]
+            if (isNumStr(variable)) {
+                codes = [
+                    'set2 a2 {}'.format(variable), 
+                ]
+            } else {
+                // 根据变量获取数值 
+                var reg = 'a2' // 默认使用 a2 寄存器
+                var offset = this.offsetMap[variable].offset
+                var byte = this.offsetMap[variable].byte
+                codes = [
+                    'set2 a3 {}'.format(this.localOffset - offset), 
+                    'subtract2 f1 a3 a3',
+                    'load_from_register2 a3 {}'.format(reg),
+                ]
+            }
+            codes.extend([
+                'save2 a2 @65532'
+            ])
+            a.extend(codes)
+        } 
+        else if (dummyCode == '.function') {
+                // -------------------------
+                // .function function_draw_point:0 x:2 y:2 color:2
+                // 1.重置 offsetMap
+                // 2.占位 f1 + 2
+                // 3.更新 offsetMap
+                // ----------------------------
+
+            // 重置 offsetMap
+            this.offsetMap = {}
+            this.localOffset = 0
+
+            var codes = []
+            var func = line[1].split(':')[0]
+            var func_res_byte = int(line[1].split(':')[1])
+            if (func.has('@') == false) {
+                func = '@' + func
+            }
+             // @func
+            codes.extend ([
+                func
+            ])
+            for(var i = 2; i < line.length(); i += 1) {
+                var each = line[i].split(':')
+                var _var = each[0]
+                var _byte = int(each[1])
+                // 占位
+                codes.extend([
+                    'set2 a3 {}'.format(_byte),
+                    'add2 f1 a3 f1',
+                ])
+                // 更新 offset 
+                this.offsetMap[_var] = {
+                    'offset': this.localOffset,
+                    'byte': _byte
+                }
+                this.localOffset += _byte
+               
+            }
+            a.extend(codes) 
+
+            // log('-------------- ,func:', this.localOffset, this.offsetMap)
+        }
+        else if (dummyCode == '.function_end') {
+            // 当前函数执行完毕，需要把函数从stack中清掉
+            // this.stack.pop()
+            // this.funcOffsetMap.delete(curCall)
+            // log('函数end: ', this.stack)
+        }
+        else if (dummyCode == '.set') { // 区分 1、2 字节
+            // ; .set c a1 
+            // 把 a1 寄存器的值写入到变量 c
+            // 注意 此指令和萧大的顺序一致
+            // 区分 1、 2 字节
+            var reg= line[2]
+            var variable = line[1]
+            var offset = this.offsetMap[variable].offset
+            var byte = this.offsetMap[variable].byte
+            var codes = []
+
+            if (byte == 2) {
+                codes = [
+                    'set2 a3 {}'.format(this.localOffset - offset), 
+                    'subtract2 f1 a3 a3',
+                    'save_from_register2 {} a3'.format(reg),
+                ]
+            } else {
+                codes = [
+                    'set2 a3 {}'.format(this.localOffset - offset), 
+                    'subtract2 f1 a3 a3',
+                    'save_from_register {} a3'.format(reg),
+                ]
+            }
+            
+            a.extend(codes) 
+        }
+        // else if (dummyCode == '.set') { // 区分 1、2 字节
+        //     // ; .set a1 c 把 a1 寄存器的值写入到变量 c
+        //     // 注意 此指令和萧大的顺序不一致!!!!
+        //     // 区分 1、 2 字节
+        //     var reg= line[1]
+        //     var variable = line[2]
+        //     var offset = this.offsetMap[variable].offset
+        //     var byte = this.offsetMap[variable].byte
+        //     var codes = []
+
+        //     if (byte == 2) {
+        //         codes = [
+        //             'set2 a3 {}'.format(this.localOffset - offset), 
+        //             'subtract2 f1 a3 a3',
+        //             'save_from_register2 {} a3'.format(reg),
+        //         ]
+        //     } else {
+        //         codes = [
+        //             'set2 a3 {}'.format(this.localOffset - offset), 
+        //             'subtract2 f1 a3 a3',
+        //             'save_from_register {} a3'.format(reg),
+        //         ]
+        //     }
+            
+        //     a.extend(codes) 
+        // }
+        else if (dummyCode == '.set1') {  // 历史遗留， 仅支持 1字节
+            // ; .set a1 c 把 a1 寄存器的值写入到变量 c
+            // 注意 此指令和萧大的顺序不一致
+            // 仅支持 2 字节
+            var reg= line[1]
+            var variable = line[2]
+            var offset = this.offsetMap[variable].offset
+
+            var codes = [
+                'set2 a3 {}'.format(this.localOffset - offset), 
+                'subtract2 f1 a3 a3',
+                'save_from_register {} a3'.format(reg),
+            ]
+            a.extend(codes) 
+        }
+        else if (dummyCode == '.load') { // 区分 1、2 字节
+            // ; .load c a1 
+            // 把 变量 c load 到 a1 寄存器
+            var variable = line[1]
+            var reg = line[2]
+            var offset = this.offsetMap[variable].offset
+            var byte = this.offsetMap[variable].byte
+            var codes = []
+
+            if (byte == 2) {
+                codes = [
+                    'set2 a3 {}'.format(this.localOffset - offset), 
+                    'subtract2 f1 a3 a3',
+                    'load_from_register2 a3 {}'.format(reg),
+                ]
+            } else {
+                codes = [
+                    'set2 a3 {}'.format(this.localOffset - offset), 
+                    'subtract2 f1 a3 a3',
+                    'load_from_register a3 {}'.format(reg)
+                ]
+            }
+            a.extend(codes) 
+        }  
+        // else if (dummyCode == '.var-string') { // 只支持 2 byte
+        //     var codes = []
+        //     var variable = line[1]
+        //     var string = line[2]
+        //     for (var i = 1; i < string.length() - 1; i += 1) {
+        //         var s = string[i]
+        //         var val = charsetIndex(s)
+        //         codes.extend([
+        //             'set2 a1 {}'.format(val), 
+        //             'save_from_register2 a1 f1',
+        //                 // f1+2
+        //             'set2 a3 2',
+        //             'add2 f1 a3 f1'
+        //         ])
+        //         // 更新 offset:
+        //         var offset = this.localOffset
+        //         if (i == 1) { // variable 只存一次
+        //             this.offsetMap[variable] = {
+        //                 'offset': offset,
+        //                 'byte': 2
+        //             }
+        //         }
+        //         this.localOffset = offset + 2
+        //     }
+        //     a.extend(codes)
+        // }
+        else if (dummyCode == '.var-string') { // 只支持 2 byte
+            // .var-string s1 "String_hao!"
+            // 实际存储为 s t r ... ! 0， 以 0 结尾
+            var codes = []
+            var variable = line[1]
+            var string = line[2].sub(1, line[2].length() - 1)
+            // 遍历 写入 f1 内存段
+            for (var i = 0; i < string.length(); i += 1) {
+                var s = string[i]
+                var val = charsetIndex(s)
+                codes.extend([
+                    'set2 a1 {}'.format(val), 
+                    'save_from_register2 a1 f1',
+                        // f1+2
+                    'set2 a3 2',
+                    'add2 f1 a3 f1'
+                ])
+                // 更新 offset:
+                var offset = this.localOffset
+                // variable map 只存一次
+                if (i == 0) { 
+                    this.offsetMap[variable] = {
+                        'offset': offset,
+                        'byte': 2
+                    }
+                }
+                this.localOffset = offset + 2
+            }
+            // 以 0 结尾
+            codes.extend([
+                'set2 a1 {}'.format(0), 
+                'save_from_register2 a1 f1',
+                    // f1+2
+                'set2 a3 2',
+                'add2 f1 a3 f1'
+            ])
+            this.localOffset += 2
+            a.extend(codes)
+        }  
+        else {
+            a.add(each)
+        }
+    }
+    // log('this.funcOffsetMap ==== ', this.funcOffsetMap)
+    // log('this.localOffset ==== ', this.localOffset)
+
+    return a
+}
+
+// 文件预处理 import
+con prepareFile = function(asm: string) {
+    var _asm = asm.split('\n')
+    for (i, line in _asm) {
+        line = line.split(' ')
+        if (line[0] == '.import') {
+            var file_path = line[1]
+            var importAsm = stringFromFile(file_path)
+            asm += '\n' + importAsm
+        }
+    }
+    return asm
+}
+
+con machineCode = function(asm: string) {
+    // 文件預處理
+    asm = prepareFile(asm)
+    // log('-------------------------- 文件預處理转译后 ---------------------------')
+    // log(asm)
+    // log('-------------------------- 文件預處理转译后 ---------------------------')
+
+    // 提前把无效的 ‘’，\n 等字符处理掉
+    asm = pureAsm(asm)
+
+    // 收集所有函数和参数字節信息
+    this.globalDefinition = {
+        'global_vars': {}
+        //     add: {
+        //         byte: 2,
+        //         vars: {
+        //             a: 2,
+        //             b: 2
+        //         }
+        //     }
+    }
+    asm = collect_function_and_varible(asm)
+
+    // 处理 .if else , .while 指令
+    // asm = handleIfCode(asm)
+    asm = handle_if_ifelse_while(asm)
+    var c = ``
+    for(i, each in asm)  {
+        c += each + `\n`
+    }
+    // log('-------------------------- 条件语句转译后 ---------------------------')
+    // // log(c)
+    // log('-------------------------- 条件语句转译后 ---------------------------')
+
+    // 翻译伪指令
+    asm = transDummyCode(asm)
+    var a = ``
+    for(i, each in asm)  {
+        a += each + `\n`
+    }
+    // log('-------------------------- 虚拟指令转译后 ---------------------------')
+    // log(a)
+    // log('-------------------------- 虚拟指令转译后 ---------------------------')
+
+    var bytes = []
+    var halt = 65535 // 255
+    var labelAddress = {}
+    var offset = 0
+
+    for(i, e in asm) {
+        var line = e.split()
+        var op = line[0]
+        if (op.has('@')) {
+            // 记录标志点位
+            labelAddress[op] = offset
+        } else if (op == 'halt') {
+            // 内存占位符
+            bytes.add(halt)
+            offset += 1
+        }
+        else if (op == 'set') {
+            // set a1 1
+            op = 0
+            var reg = regByName(line[1])
+            var val = intX16(line[2])[0]
+            bytes.extend([op, reg, val])
+            offset += 3
+        } else if (op == 'load') {
+            // load @100 a1
+            op = 1
+            var memo = memoAddress(line[1], 'x16')
+            var reg = regByName(line[2])
+            bytes.add(op)
+            bytes.extend(memo)
+            bytes.add(reg)
+            offset += 4
+        }
+        else if (op == 'add') {
+            // add a1 a2 a2
+            op = 2
+            var reg1 = regByName(line[1])
+            var reg2 = regByName(line[2])
+            var reg3 = regByName(line[3])
+            bytes.extend([op, reg1, reg2, reg3])
+            offset += 4
+        }
+        else if (op == 'save') {
+            // save a1 600
+            op = 3
+            var reg = regByName(line[1])
+            var memo = memoAddress(line[2], 'x16')
+            bytes.add(op)
+            bytes.add(reg)
+            bytes.extend(memo)
+            offset += 4
+        }
+        else if (op == 'compare') {
+            // compare a2 a3
+            op = 4
+            var reg1 = regByName(line[1])
+            var reg2 = regByName(line[2])
+            bytes.extend([op, reg1, reg2])
+            offset += 3
+        }
+        else if (op == 'jump_if_less') {
+            // jump_if_less @label 或者 @100
+            op = 5
+            var memo = memoAddress(line[1], 'x16')
+            bytes.add(op)
+            bytes.extend(memo)
+            offset += 3
+        }
+        else if (op == 'jump') {
+            // jump @label 或者 @100
+            op = 6
+            var memo = memoAddress(line[1], 'x16')
+            bytes.add(op)
+            bytes.extend(memo)
+            offset += 3
+        } else if (op == 'save_from_register') {
+            op = 7
+            var reg1 = regByName(line[1])
+            var reg2 = regByName(line[2])
+            bytes.extend([op, reg1, reg2])
+            offset += 3
+        }
+        else if (op == 'set2') {
+            //  set2 a1 256
+            op = 8
+            var reg = regByName(line[1])
+            var val = intX16(line[2])
+            bytes.extend([op, reg,val[0], val[1]])
+            offset += 4
+        }
+        else if (op == 'load2') {
+            // load2 @258 a2
+            // 9, 2, 1, 2,
+            op = 9
+            var memo = memoAddress(line[1], 'x16')
+            var reg = regByName(line[2])
+            bytes.add(op)
+            bytes.extend(memo)
+            bytes.add(reg)
+            offset += 4
+        }
+        else if (op == 'add2') {
+            // add2 a1 a2 a3
+            op = 10
+            var reg1 = regByName(line[1])
+            var reg2 = regByName(line[2])
+            var reg3 = regByName(line[3])
+            bytes.extend([op, reg1, reg2, reg3])
+            offset += 4
+        }
+        else if (op == 'save2') {
+            // save2 a1 @258
+            op = 11
+            var reg = regByName(line[1])
+            var mome = memoAddress(line[2], 'x16')
+            bytes.extend([op, reg, mome[0], mome[1]])
+            offset += 4
+            // log('save2 === ', line, [op, reg, mome[0], mome[1]])
+        }
+        else if (op == 'subtract2') {
+            //  subtract2 a1 a2 a3
+            op = 12
+            var reg1 = regByName(line[1])
+            var reg2 = regByName(line[2])
+            var reg3 = regByName(line[3])
+            bytes.extend([op, reg1, reg2, reg3])
+            offset += 4
+        }  
+        else if (op == 'load_from_register') {
+            // load_from_register a1 a2
+            op = 13
+            var reg1 = regByName(line[1])
+            var reg2 = regByName(line[2])
+            bytes.extend([op, reg1, reg2])
+            offset += 3
+        }
+        else if (op == 'load_from_register2') {
+            // load_from_register2 a1 a2
+            op = 14
+            var reg1 = regByName(line[1])
+            var reg2 = regByName(line[2])
+            bytes.extend([op, reg1, reg2])
+            offset += 3
+        }
+        else if (op == 'save_from_register2') {
+            //  save_from_register2 a1 a2
+            op = 15
+            var reg1 = regByName(line[1])
+            var reg2 = regByName(line[2])
+            bytes.extend([op, reg1, reg2])
+            offset += 3
+        }
+        else if (op == 'jump_from_register') {
+            //  jump_from_register a1
+            op = 16
+            var reg = regByName(line[1])
+            bytes.extend([op, reg])
+            offset += 2
+        } 
+        else if (op == 'shift_right') {
+            //  shift_right a1 a2 a3
+            op = 17
+            var reg1 = regByName(line[1])
+            var reg2 = regByName(line[2])
+            var reg3 = regByName(line[3])
+            bytes.extend([op, reg1, reg2, reg3])
+            offset += 4
+        }
+        else if (op == 'and') {
+            //  and a1 a2 a3
+            op = 19
+            var reg1 = regByName(line[1])
+            var reg2 = regByName(line[2])
+            var reg3 = regByName(line[3])
+            bytes.extend([op, reg1, reg2, reg3])
+            offset += 4
+        }
+    }
+
+    // log('labelAddress: ', labelAddress)
+
+    // log('before replaceLabel--------------', bytes)
+
+    // 替换 @label
+    bytes = replaceLabel(bytes, labelAddress)
+
+    return bytes
+    
+}
